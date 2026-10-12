@@ -148,6 +148,13 @@ def test_sign_custom_salt(base: str) -> None:
         URLSafeTimedSerializer(SECRET, salt=SALT).loads(body["token"])
 
 
+def test_sign_unencodable_payload_is_400(base: str) -> None:
+    # A lone surrogate is valid JSON but cannot be encoded as UTF-8.
+    status, _, body = request(base, "POST", "/sign", raw=b'{"payload": "\\ud800"}')
+    assert status == 400
+    assert body["error"] == "invalid_payload"
+
+
 def test_sign_missing_payload(base: str) -> None:
     status, _, body = request(base, "POST", "/sign", {"salt": "x"})
     assert status == 400
@@ -316,6 +323,14 @@ def test_missing_content_length_is_rejected(base: str) -> None:
     data = raw_exchange(base, b"POST /sign HTTP/1.1\r\nHost: x\r\n\r\n")
     assert data.startswith(b"HTTP/1.0 411")
     assert b"length_required" in data
+
+
+def test_content_length_with_underscore_is_rejected(base: str) -> None:
+    data = raw_exchange(
+        base,
+        b'POST /sign HTTP/1.1\r\nHost: x\r\nContent-Length: 1_0\r\n\r\n{"payload": 1}  ',
+    )
+    assert data.startswith(b"HTTP/1.0 400")
 
 
 def test_chunked_body_is_rejected(base: str) -> None:

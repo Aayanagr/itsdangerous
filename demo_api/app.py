@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import typing as t
 from http.server import BaseHTTPRequestHandler
@@ -25,6 +26,7 @@ logger = logging.getLogger("demo_api")
 
 SECRET_ENV_VAR = "DEMO_SECRET"
 DEFAULT_SALT = "demo-api"
+_DIGITS = re.compile(r"[0-9]+")
 MAX_BODY_BYTES = 64 * 1024
 REQUEST_TIMEOUT_S = 10.0
 
@@ -206,10 +208,9 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
         raw_length = self.headers.get("Content-Length")
         if raw_length is None:
             raise ApiError(411, "length_required", "Content-Length header is required")
-        try:
-            length = int(raw_length)
-        except ValueError:
+        if not _DIGITS.fullmatch(raw_length):
             raise ApiError(400, "bad_request", "Content-Length must be an integer")
+        length = int(raw_length)
         if length < 0:
             raise ApiError(400, "bad_request", "Content-Length must not be negative")
         if length > MAX_BODY_BYTES:
@@ -245,7 +246,11 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
         if "payload" not in body:
             raise ApiError(400, "missing_field", "'payload' is required")
         salt = _optional_salt(body)
-        token = self._serializer(salt).dumps(body["payload"])
+        try:
+            token = self._serializer(salt).dumps(body["payload"])
+        except (UnicodeError, TypeError, ValueError):
+            # e.g. a lone surrogate in a JSON string cannot be encoded as UTF-8
+            raise ApiError(400, "invalid_payload", "'payload' could not be encoded")
         self._send_json(200, {"token": token})
 
     def _post_verify(self) -> None:
